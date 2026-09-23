@@ -1,0 +1,14 @@
+{
+  "name": "pennywise-expense-tracker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A simple full-stack personal expense tracker built for Assignment 1, Part A.",
+  "scripts": {
+    "dev": "concurrently -k -n api,web -c green,cyan \"npm run dev:api\" \"npm run dev:web\"",
+    "dev:api": "npm --prefix server run dev",
+    "dev:web": "npm --prefix client run dev",
+    "start": "npm --prefix server start",
+    "build": "npm --prefix client run build"
+  },
+  "devDependencies": { "concurrently": "^9.1.2" }
+}
