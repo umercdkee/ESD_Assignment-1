@@ -29,6 +29,27 @@ Requirements: Node.js 18 or newer and npm.
 
 3. Open [http://localhost:5173](http://localhost:5173). The API listens on port 3001. Add an expense, try the category/month filters, search, export, and delete. Without credentials you will see sample activity; your changes last only until the API restarts.
 
+## Run with Docker
+
+Requirements: Docker Desktop (or Docker Engine) with the Compose plugin.
+
+1. From the project root, copy `.env.example` to `.env` and set the Supabase values if you want persistent storage. You can leave them as placeholders to use sample data in memory.
+
+   ```dotenv
+   SUPABASE_URL=https://your-project.supabase.co
+   SUPABASE_ANON_KEY=your-anon-or-publishable-key
+   ```
+
+2. Build and start the containers:
+
+   ```sh
+   docker compose up --build
+   ```
+
+3. Open [http://localhost:8080](http://localhost:8080). Nginx serves the built React app and forwards `/api` requests to the Express container. The API is available inside the Compose network on port 3001.
+
+Stop with `docker compose down`. Rebuild after changing source with `docker compose up --build`. The app does not store data in Docker: for persistent expenses, configure Supabase and apply `supabase/schema.sql` as described above. The Supabase key is passed only to the API container; do not use a service role key.
+
 ## Connect Supabase for persistent data
 
 1. Create a Supabase project.
@@ -51,4 +72,3 @@ The included RLS policies are deliberately permissive for a local, single-user a
 | GET | `/metrics` | Prometheus metrics for the Part B work |
 
 POST fields: `title`, `amount`, `category`, `expense_date` (`YYYY-MM-DD`), and optional `notes`. Amounts must be positive. Categories are Food, Transport, Housing, Bills, Shopping, Health, Entertainment, and Other.
-
