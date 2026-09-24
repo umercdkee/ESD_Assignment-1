@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import { z } from 'zod';
 import { logger } from './logger.js';
-import { expensesCreated, httpDuration, httpRequests, registry } from './metrics.js';
+import { expensesCreated, httpDuration, httpDurationSummary, httpRequests, registry } from './metrics.js';
 import { createExpense, deleteExpense, listExpenses, supabase, updateExpense } from './store.js';
 
 const app = express();
@@ -31,13 +31,16 @@ app.use(helmet({
   },
 }));
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || 'http://localhost:5173' }));
-app.use(express.json({ limit: '16kb' }));
 app.use((req, res, next) => {
   req.id = req.get('x-request-id') || randomUUID();
   res.setHeader('x-request-id', req.id);
   next();
 });
-app.use(pinoHttp({ logger, genReqId: (req) => req.id }));
+app.use(pinoHttp({
+  logger,
+  genReqId: (req) => req.id,
+  customProps: (req) => ({ request_id: req.id }),
+}));
 
 // Use the matched route template as a label to keep Prometheus cardinality bounded.
 app.use((req, res, next) => {
@@ -45,10 +48,15 @@ app.use((req, res, next) => {
   res.on('finish', () => {
     const labels = { method: req.method, route: req.route?.path ? `${req.baseUrl}${req.route.path}` : req.path === '/api/expenses' ? '/api/expenses' : 'unmatched', status_code: String(res.statusCode) };
     httpRequests.inc(labels);
-    httpDuration.observe(labels, Number(process.hrtime.bigint() - started) / 1e9);
+    const durationSeconds = Number(process.hrtime.bigint() - started) / 1e9;
+    httpDuration.observe(labels, durationSeconds);
+    httpDurationSummary.observe(labels, durationSeconds);
   });
   next();
 });
+
+// Attach logging and metrics before parsing so malformed JSON gets observed too.
+app.use(express.json({ limit: '16kb' }));
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', storage: supabase ? 'supabase' : 'memory' }));
 app.get('/api/categories', (_req, res) => res.json(categories));

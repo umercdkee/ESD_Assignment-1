@@ -1,0 +1,42 @@
+name: pennywise-filebeat
+
+filebeat.autodiscover:
+  providers:
+    - type: docker
+      host: unix:///var/run/docker.sock
+      labels.dedot: true
+      hints.enabled: false
+      templates:
+        - condition:
+            equals:
+              docker.container.labels.pennywise_service: api
+          config:
+            - type: filestream
+              id: pennywise-api-${data.docker.container.id}
+              prospector.scanner.symlinks: true
+              close.on_state_change.removed: false
+              paths:
+                - /var/lib/docker/containers/${data.docker.container.id}/*.log
+              parsers:
+                - container: ~
+                - ndjson:
+                    target: ""
+                    message_key: msg
+                    add_error_key: true
+
+processors:
+  - add_host_metadata: ~
+  - add_docker_metadata:
+      host: unix:///var/run/docker.sock
+
+setup.ilm.enabled: false
+setup.template.enabled: true
+setup.template.name: pennywise-logs
+setup.template.pattern: pennywise-logs-*
+
+output.elasticsearch:
+  hosts: ["http://elasticsearch:9200"]
+  index: "pennywise-logs-%{+yyyy.MM.dd}"
+
+logging:
+  level: info

@@ -20,6 +20,18 @@ export const httpDuration = new client.Histogram({
   registers: [registry],
 });
 
+// A rolling-window Summary is included to demonstrate the fourth Prometheus
+// metric type. The Histogram remains the preferred source for fleet-wide p95s.
+export const httpDurationSummary = new client.Summary({
+  name: 'pennywise_http_request_duration_summary_seconds',
+  help: 'Request duration summary over a rolling ten-minute window.',
+  labelNames: ['method', 'route', 'status_code'],
+  percentiles: [0.5, 0.95, 0.99],
+  maxAgeSeconds: 600,
+  ageBuckets: 5,
+  registers: [registry],
+});
+
 export const expensesCreated = new client.Counter({
   name: 'pennywise_expenses_created_total',
   help: 'Expenses successfully created.',
