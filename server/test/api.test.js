@@ -50,6 +50,10 @@ test('expense API validates input and supports list, create, update, delete and 
   assert.equal(created.title, 'Test groceries');
   assert.equal(Number(created.amount), 18.25);
 
+  const createdMetrics = await (await fetch(`${base}/metrics`)).text();
+  const storedAfterCreate = createdMetrics.split('\n').find((line) => line.startsWith('pennywise_expenses_stored{'));
+  assert.equal(Number(storedAfterCreate?.split(' ').at(-1)), 5, 'create increments the stored-expense gauge');
+
   const listedResponse = await fetch(`${base}/api/expenses`);
   const listed = await listedResponse.json();
   assert.ok(listed.some((expense) => expense.id === created.id));
@@ -64,6 +68,17 @@ test('expense API validates input and supports list, create, update, delete and 
   assert.equal(updated.title, 'Updated groceries');
   assert.equal(Number(updated.amount), 21.5);
   assert.equal(updated.category, 'Shopping');
+  assert.equal(updated.expense_date, '2026-09-22');
+  assert.equal(updated.notes, 'Updated note');
+
+  const updatedList = await (await fetch(`${base}/api/expenses`)).json();
+  assert.ok(updatedList.some((expense) => expense.id === created.id && expense.title === 'Updated groceries'));
+
+  const invalidUpdate = await fetch(`${base}/api/expenses/${created.id}`, {
+    method: 'PUT', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ title: '', amount: -1, category: 'Food', expense_date: 'invalid' }),
+  });
+  assert.equal(invalidUpdate.status, 400);
 
   const missingUpdate = await fetch(`${base}/api/expenses/not-a-real-id`, {
     method: 'PUT', headers: { 'content-type': 'application/json' },
@@ -76,10 +91,15 @@ test('expense API validates input and supports list, create, update, delete and 
   const missingDelete = await fetch(`${base}/api/expenses/${created.id}`, { method: 'DELETE' });
   assert.equal(missingDelete.status, 404);
 
+  const afterDelete = await (await fetch(`${base}/api/expenses`)).json();
+  assert.ok(!afterDelete.some((expense) => expense.id === created.id), 'deleted expense is absent from the list');
+
   const metricsResponse = await fetch(`${base}/metrics`);
   assert.equal(metricsResponse.status, 200);
   const metrics = await metricsResponse.text();
   assert.match(metrics, /pennywise_http_requests_total/);
   assert.match(metrics, /pennywise_expenses_created_total/);
   assert.match(metrics, /pennywise_expenses_stored/);
+  const storedAfterDelete = metrics.split('\n').find((line) => line.startsWith('pennywise_expenses_stored{'));
+  assert.equal(Number(storedAfterDelete?.split(' ').at(-1)), 4, 'delete decrements the stored-expense gauge');
 });

@@ -48,7 +48,7 @@ Requirements: Docker Desktop (or Docker Engine) with the Compose plugin.
 
 3. Open [http://localhost:8080](http://localhost:8080). Nginx serves the built React app and forwards `/api` requests to the Express container. The API is available inside the Compose network on port 3001.
 
-The observability services are also available at [http://localhost:9090](http://localhost:9090) (Prometheus), [http://localhost:3000](http://localhost:3000) (Grafana), and [http://localhost:5601](http://localhost:5601) (Kibana). Grafana provisions the `Pennywise Observability` dashboard and Prometheus data source on startup. The local Grafana login starts as `admin` / `admin`; Grafana asks you to change the password on first login. Kibana and Elasticsearch are local-only with security disabled for this coursework stack; do not expose ports 5601 or 9200 publicly. Elasticsearch has a 2 GB container memory limit and a 1 GB Java heap. The stack needs internet access the first time so Docker can download its images.
+The observability services are also available at [http://localhost:9090](http://localhost:9090) (Prometheus), [http://localhost:3000](http://localhost:3000) (Grafana), and [http://localhost:5601](http://localhost:5601) (Kibana). Grafana provisions the `Pennywise Observability` dashboard and Prometheus data source on startup. The local Grafana login starts as `admin` / `admin`; Grafana asks you to change the password on first login. Kibana and Elasticsearch are local-only with security disabled for this coursework stack; do not expose ports 5601 or 9200 publicly. To fit an 8 GB laptop, Elasticsearch is limited to 1.5 GB with a 512 MB Java heap, and Kibana is limited to 1 GB with a 512 MB Node.js heap. Together their container memory limits are 2.5 GB. The stack needs internet access the first time so Docker can download its images.
 
 On Windows with Docker Desktop and the WSL 2 backend, Elasticsearch may require a higher WSL `vm.max_map_count`. If Elasticsearch exits with a memory-map bootstrap error, run this from PowerShell while Docker Desktop is running, then start Compose again:
 
@@ -95,17 +95,39 @@ Prometheus scrapes the API and Node Exporter every five seconds. Grafana automat
 | `pennywise_*` default process metrics | Node.js process and runtime health | Various | varies | default metric labels | `server/src/metrics.js`, collected by `prom-client` |
 | `node_*` | Machine CPU, memory, filesystem, and network health | Exporter metrics (counters/gauges) | varies | `instance`, device/core and `machine` | Node Exporter; scraped by Prometheus from `node-exporter:9100` |
 
+To create repeatable sample traffic for the dashboards and log search, start the stack with `docker compose up --build`, then run `npm run demo:observability` from the repository root. The script uses the host-published app URL (`http://localhost:8080`), makes normal requests plus validation, not-found, and malformed-JSON requests, creates and deletes one clearly labelled demo expense, and prints each status and request ID. Set `API_BASE_URL` to override the URL. Give Prometheus and Filebeat a few seconds after it finishes to collect the data.
+
+In Grafana, select the `Pennywise Observability` dashboard. To inspect request counts by status directly in Explore, use `sum by (status_code) (increase(pennywise_http_requests_total[5m]))`. In Kibana Discover, select the `pennywise-logs-*` data view and search `service : "pennywise-api"`; for the generated malformed-body error, search `msg : "request failed"`, then use its `request_id` to find the corresponding access log. The script prints request IDs for each response, including the malformed JSON request.
+
+### Part E.1: reproduce slow requests
+
+`npm run experiment:slow-requests` sends `/api/health` requests in three one-minute stages: baseline, fault injected, and recovery. Prometheus scrapes every five seconds, so each stage includes at least twelve scrapes. During the fault stage, every explicitly marked request is delayed by 500 ms. This fault is disabled by default and requires `DEMO_FAULT_INJECTION=true` in `.env`; the script cannot activate it by itself. To run the experiment, add `DEMO_FAULT_INJECTION=true` and `DEMO_DELAY_MS=500` to `.env` (preserve any existing Supabase settings), then run `docker compose up -d --build api` and `npm run experiment:slow-requests`. Set the flag back to `false` and run `docker compose up -d api` after capturing results. The fault only applies to requests carrying the experiment's `x-demo-fault` header, so ordinary app requests are unaffected.
+
+In Grafana Explore, compare the request duration p95 for `/api/health` using `histogram_quantile(0.95, sum by (le) (rate(pennywise_http_request_duration_seconds_bucket{route="/api/health"}[1m])))`. The injected stage should raise p95; request counts and status should remain similar because the delayed requests still succeed. The script prints the exact stage times, status, latency, and request IDs. In Kibana Discover, search `service : "pennywise-api" AND req.url : "/api/health"`, then inspect `responseTime` and correlate a request with the script's printed `request_id`. The experiment introduces latency only; it should not create 4xx/5xx responses.
+
+### Part E.2: bounded cardinality demonstration
+
+The separate `pennywise_demo_requests_total` test counter is disabled by default. It can optionally include `request_id` as a label; regular application metrics never use request IDs as labels. For the high-cardinality phase, set `CARDINALITY_DEMO_ENABLED=true` and `CARDINALITY_DEMO_REQUEST_ID_LABEL=true` in `.env`, recreate the API with `docker compose up -d --build api`, then run `npm run experiment:cardinality`. The script sends exactly 100 demo requests in batches of 20, waits for a Prometheus scrape, and prints the series count at each checkpoint. Expected counts are 20, 40, 60, 80, and 100.
+
+For comparison, set `CARDINALITY_DEMO_REQUEST_ID_LABEL=false`, recreate the API with `docker compose up -d api`, wait for a scrape, and run the script again. The series count should remain 1 while the counter value increases. The script checks that Prometheus has cleared the previous active series before starting; old samples remain in Prometheus storage until retention expires. Turn `CARDINALITY_DEMO_ENABLED=false` after the experiment. The endpoint and metric are disabled by default. Keep this to 100 IDs; unique IDs create one time series per request and increase Prometheus memory, storage, and query costs. Put request IDs in logs instead.
+
+Prometheus query for both phases:
+
+```promql
+count(pennywise_demo_requests_total)
+```
+
 Useful Grafana/PromQL examples:
 
 ```promql
 sum by (route) (rate(pennywise_http_requests_total[5m]))
 sum by (route) (rate(pennywise_http_requests_total{status_code=~"5.."}[5m]))
-histogram_quantile(0.95, sum by (le) (rate(pennywise_http_request_duration_seconds_bucket[5m])))
+histogram_quantile(0.95, sum by (le) (rate(pennywise_http_request_duration_seconds_bucket[1m])))
 sum by (category) (increase(pennywise_expenses_created_total[1h]))
 pennywise_expenses_stored
 ```
 
-The histogram p95 is an estimate over a rolling five-minute window, calculated by Prometheus from bucket rates; unlike Summary quantiles, histogram buckets can be aggregated across API instances. The Summary panel shows its application-side p95 over a rolling ten-minute window. See the prebuilt dashboard for the exact queries and chart descriptions. For the Windows Docker Desktop run, machine panels describe the Linux VM accessible to the exporter, not Windows host resource usage.
+The Grafana histogram p95 panel uses a rolling one-minute window, calculated by Prometheus from bucket rates; unlike Summary quantiles, histogram buckets can be aggregated across API instances. Slow observations can remain in that moving window for up to one minute after recovery begins. The Summary panel shows its application-side p95 over a rolling ten-minute window, so it can stay elevated longer. See the prebuilt dashboard for the exact queries and chart descriptions. For the Windows Docker Desktop run, machine panels describe the Linux VM accessible to the exporter, not Windows host resource usage.
 
 ## Part C logs
 

@@ -20,7 +20,7 @@ filebeat.autodiscover:
               parsers:
                 - container: ~
                 - ndjson:
-                    target: ""
+                    target: "json"
                     message_key: msg
                     add_error_key: true
 
@@ -39,4 +39,4 @@ output.elasticsearch:
   index: "pennywise-logs-%{+yyyy.MM.dd}"
 
 logging:
-  level: info
+  level: info 

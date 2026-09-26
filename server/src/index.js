@@ -6,7 +6,7 @@ import helmet from 'helmet';
 import pinoHttp from 'pino-http';
 import { z } from 'zod';
 import { logger } from './logger.js';
-import { expensesCreated, httpDuration, httpDurationSummary, httpRequests, registry } from './metrics.js';
+import { cardinalityDemoEnabled, cardinalityDemoRequests, cardinalityDemoUsesRequestId, expensesCreated, httpDuration, httpDurationSummary, httpRequests, registry } from './metrics.js';
 import { createExpense, deleteExpense, listExpenses, supabase, updateExpense } from './store.js';
 
 const app = express();
@@ -55,10 +55,26 @@ app.use((req, res, next) => {
   next();
 });
 
+// Part E.1: opt-in, local-only fault injection. Only explicitly marked API
+// requests are eligible, and the fault is disabled unless Compose enables it.
+const demoFaultEnabled = process.env.DEMO_FAULT_INJECTION === 'true';
+const demoDelayMs = Math.min(5000, Math.max(1, Number(process.env.DEMO_DELAY_MS) || 500));
+app.use('/api', async (req, _res, next) => {
+  if (!demoFaultEnabled || req.get('x-demo-fault') !== 'add-delay') return next();
+  await new Promise((resolve) => setTimeout(resolve, demoDelayMs));
+  return next();
+});
+
 // Attach logging and metrics before parsing so malformed JSON gets observed too.
 app.use(express.json({ limit: '16kb' }));
 
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', storage: supabase ? 'supabase' : 'memory' }));
+app.post('/api/demo/cardinality', (req, res) => {
+  if (!cardinalityDemoEnabled) return res.status(404).json({ error: 'Cardinality demo is disabled.' });
+  if (cardinalityDemoUsesRequestId) cardinalityDemoRequests.inc({ request_id: req.id });
+  else cardinalityDemoRequests.inc();
+  return res.json({ status: 'counted', request_id: req.id, request_id_label: cardinalityDemoUsesRequestId });
+});
 app.get('/api/categories', (_req, res) => res.json(categories));
 app.get('/api/expenses', async (_req, res, next) => {
   try { res.json(await listExpenses()); } catch (error) { next(error); }

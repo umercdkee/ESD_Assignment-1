@@ -8,6 +8,9 @@
     "dev:api": "npm --prefix server run dev",
     "dev:web": "npm --prefix client run dev",
     "start": "npm --prefix server start",
+    "demo:observability": "node scripts/demo-observability.mjs",
+    "experiment:slow-requests": "node scripts/experiment-slow-requests.mjs",
+    "experiment:cardinality": "node scripts/experiment-cardinality.mjs",
     "build": "npm --prefix client run build"
   },
   "devDependencies": { "concurrently": "^9.1.2" }

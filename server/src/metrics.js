@@ -44,3 +44,14 @@ export const expensesStored = new client.Gauge({
   help: 'Number of expense records currently stored.',
   registers: [registry],
 });
+
+// Part E.2: this bounded test counter exists only during the opt-in local
+// cardinality experiment. Never add request IDs to production metrics.
+export const cardinalityDemoEnabled = process.env.CARDINALITY_DEMO_ENABLED === 'true';
+export const cardinalityDemoUsesRequestId = process.env.CARDINALITY_DEMO_REQUEST_ID_LABEL === 'true';
+export const cardinalityDemoRequests = cardinalityDemoEnabled ? new client.Counter({
+  name: 'pennywise_demo_requests_total',
+  help: 'Requests counted by the bounded Part E.2 cardinality demonstration.',
+  labelNames: cardinalityDemoUsesRequestId ? ['request_id'] : [],
+  registers: [registry],
+}) : null;
